@@ -69,7 +69,7 @@ int localEraStartYear       = 2019;
 char localHolidays[4096]    = "";
 
 // constants
-constexpr double SYNODIC_MONTH = 29.53;      // Average length of a lunar cycle in days
+constexpr double SYNODIC_MONTH = 29.53058853;// Average length of a lunar cycle in days
 constexpr uint8_t IMAGE_SIZE = 120;          // Size of the moon face image canvas (120x120 pixels)
 constexpr uint8_t PANEL_SIZE = 120;          // Size of the month panel canvas (120x120 pixels)
 constexpr uint8_t MARGIN = 6;                // Margin for the moon image
@@ -226,13 +226,12 @@ double getMoonAge(time_t currentTime) {
 
   // Reference new moon date: January 6, 2000, at 18:14 UTC
   const double referenceJulianDay = 2451550.26; // Julian Day for the reference new moon
-  const double synodicMonth = 29.53058853; // Average length of a lunar cycle in days
 
   double deltaDays = julianDay - referenceJulianDay;
-  double moonAge = fmod(deltaDays, synodicMonth); // Moon's age
+  double moonAge = fmod(deltaDays, SYNODIC_MONTH); // Moon's age
 
   if (moonAge < 0)
-    moonAge += synodicMonth; // Ensure moonAge is positive
+    moonAge += SYNODIC_MONTH; // Ensure moonAge is positive
 
   return moonAge;
 }
@@ -533,13 +532,13 @@ Point calcAxisOfTheDay(int tm_year, int tm_month, int tm_mday, bool isMini) {
   uint8_t firstWday = getWdayOfTheDay(tm_year, tm_month, 1);   // 0 (Sunday) to 6 (Saturday)
   Point axis {0,0};
 
-  uint8_t lMargin = 50, tMargin = 40, hMargin = 0, cellUnit = 60;
+  uint8_t lMargin = 50, tMargin = 32, hMargin = 0, cellUnit = 60;
   if (isMini) { lMargin = 15; tMargin = 40; hMargin = 20; cellUnit = 16; }
 
   int col = !isWkStartsMon ? tm_wday : (tm_wday + 6) % 7;   // Adjust x position based on week start day
   int row = !isWkStartsMon ? (tm_mday + firstWday - 1) / 7 : (tm_mday + (firstWday + 6) % 7 - 1) / 7; // Adjust y position based on week start day
   axis.x = lMargin + col * cellUnit;
-  axis.y = tMargin + row * cellUnit - row;  //???
+  axis.y = tMargin + row * cellUnit;
   return axis;
 }
 
@@ -554,20 +553,37 @@ void drawHolidays(const Holidays Holidays, int tm_year, int tm_month, bool isMin
   // Placeholder for future implementation of holiday drawing logic
   int count = Holidays.count;
   if (count == 0) return;
-
+  
   panelCanvas.setTextSize(0.9);
   panelCanvas.setTextColor(TFT_RED, TFT_WHITE);
+  char dayText[4];
+  if (isMini) panelCanvas.setFont(MINI_MONTH_FONT);
+  else panelCanvas.setFont(CAL_FONT);
   
   for (int i = count; i > 0; --i) {
     Point axis = calcAxisOfTheDay(tm_year, tm_month, Holidays.days[i - 1], isMini);
 
-    if (isMini) panelCanvas.setFont(MINI_MONTH_FONT);
-    else panelCanvas.setFont(CAL_FONT);
-    char dayText[4];
     snprintf(dayText, sizeof(dayText), "%u", Holidays.days[i - 1]);
     uint8_t shift = Holidays.days[i - 1] < 10 ? 2 : 0;          // Shift the text position for single digit days (heck!)
     panelCanvas.drawString(dayText, axis.x + shift, axis.y);    // Draw the holiday number at the calculated position
   }
+}
+
+/**
+ * @brief Draws a circle around the specified day in the calendar.
+ * @param tm_mday The day of the month (1-31) to draw the circle around.
+ * @param tm_wday The day of the week (0 = Sunday, 1 = Monday, ..., 6 = Saturday) for the specified day.
+ * @param firstWday The day of the week (0 = Sunday, 1 = Monday, ..., 6 = Saturday) for the first day of the month.
+ */
+void drawCircleAroundTheDay(int tm_mday, int tm_wday, int firstWday) {
+  uint8_t lMargin = 50, tMargin = 32, cellUnit = 60;
+  
+  uint16_t col = !isWkStartsMon ? tm_wday : (tm_wday + 6) % 7;   // Adjust x position based on week start day
+  uint16_t row = !isWkStartsMon ? (tm_mday + firstWday - 1) / 7 : (tm_mday + (firstWday + 6) % 7 - 1) / 7; // Adjust y position based on week start day
+  int16_t x = lMargin + col * cellUnit;
+  int16_t y = tMargin + row * cellUnit + 16;    // Adjust y position for the circle
+  for (uint8_t r = 30; r > 25; r--)
+    panelCanvas.drawCircle(x, y, r, TFT_RED);
 }
 
 /**
@@ -583,25 +599,28 @@ void drawCalendar(int tm_year, int tm_month, bool isMini) {
   constexpr const char* miniWDays[] = {"S", "M", "T", "W", "T", "F", "S"};
   const char* const* wDays = isMini ? miniWDays : fullWDays;    // For memory saving, use different array for the mini calendar display
 
-  uint8_t lMargin = 50, tMargin = 40, hMargin = 0, cellUnit = 60;
+  uint8_t lMargin = 50, tMargin = 32, hMargin = 0, cellUnit = 60;
   if (isMini) { lMargin = 15; tMargin = 40; hMargin = 20; cellUnit = 16; }
 
   panelCanvas.fillSprite(TFT_WHITE);
   panelCanvas.setTextDatum(textdatum_t::top_center);
 
-  uint8_t startCol = isWkStartsMon ? (firstWday + 6) % 7 : firstWday;  // Column index of day 1 in the first row
+  // Column index of day 1 in the first row
+  uint8_t startCol = isWkStartsMon ? (firstWday + 6) % 7 : firstWday;
   uint8_t day = 1;
   for (uint8_t x = 0; x < 7; x++) {     // Draw the weekday headers and the first row of days 0=Sunday to 6=Saturday
     int _x = x;
-    if (isWkStartsMon) _x = (x + 1) % 7;                                             // from 1=Monday to 7=0=Sunday
-    if (_x == 0) panelCanvas.setTextColor(TFT_WHITE, TFT_RED);       // Sunday,   WeekStart = Sunday then _x = 0, WeekStart = Monday then _x = 6
-    else if (_x == 6) panelCanvas.setTextColor(TFT_WHITE, TFT_BLUE); // Saturday, WeekStart = Sunday then _x = 6, WeekStart = Monday then _x = 5
+    if (isWkStartsMon) _x = (x + 1) % 7;                              // from 1=Monday to 7=0=Sunday
+    if (_x == 0) panelCanvas.setTextColor(TFT_WHITE, TFT_RED);        // Sunday,   WeekStart = Sunday then _x = 0, WeekStart = Monday then _x = 6
+    else if (_x == 6) panelCanvas.setTextColor(TFT_WHITE, TFT_BLUE);  // Saturday, WeekStart = Sunday then _x = 6, WeekStart = Monday then _x = 5
     else panelCanvas.setTextColor(TFT_WHITE, TFT_BLACK);
     panelCanvas.setTextSize(1);
     if (isMini) panelCanvas.setFont(MINI_MONTH_FONT);
     else panelCanvas.setFont(MONTH_FONT_SMALL);
     panelCanvas.drawString(wDays[_x], lMargin + x * cellUnit, hMargin);   // Write the weekday header text
-    if (x >= startCol) {   // Write the first row of days, considering the week start day
+    
+    // Write the first row of days, considering the week start day
+    if (x >= startCol) {
       if (_x == 0) panelCanvas.setTextColor(TFT_RED, TFT_WHITE);
       else if (_x == 6) panelCanvas.setTextColor(TFT_BLUE, TFT_WHITE);
       else panelCanvas.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -610,13 +629,13 @@ void drawCalendar(int tm_year, int tm_month, bool isMini) {
       else panelCanvas.setFont(CAL_FONT);
       char dayText[4];
       snprintf(dayText, sizeof(dayText), "%u", day);
-      uint8_t shift = day < 10 ? 2 : 0;                   // Shift the text position for single digit days (heck!)
-      panelCanvas.drawString(dayText, lMargin + x * cellUnit + shift, tMargin);   // Write the first row of days
+      panelCanvas.drawString(dayText, lMargin + x * cellUnit + 1, tMargin);   // Write the first row of days
       day++;
     }
   }
 
-  for (uint16_t y = tMargin + cellUnit; y < (tMargin + 6 * cellUnit); y += cellUnit - 1) {
+  // Then, write the remaining rows of days
+  for (uint16_t y = tMargin + cellUnit; y < (tMargin + 6 * cellUnit); y += cellUnit/* - 1*/) {
     for (uint16_t x = lMargin; x < (lMargin + 7 * cellUnit); x += cellUnit) {
       if ((day + firstWday - 1) % 7 == 0) panelCanvas.setTextColor(TFT_RED, TFT_WHITE);
       else if ((day + firstWday - 1) % 7 == 6) panelCanvas.setTextColor(TFT_BLUE, TFT_WHITE);
@@ -628,7 +647,7 @@ void drawCalendar(int tm_year, int tm_month, bool isMini) {
       day++;
       if (day > lastDay) break; // Stop if the last day of the month
     }
-    if (day > lastDay) break; // Stop outer loop if the last day of the month
+    if (day > lastDay) break;   // Stop outer loop if the last day of the month
   }
 
   if (localCalendarEnabled) {
@@ -642,16 +661,14 @@ void drawCalendar(int tm_year, int tm_month, bool isMini) {
     time(&current);
     struct tm local_tm;
     localtime_r(&current, &local_tm);
+    
     if (local_tm.tm_year == tm_year && local_tm.tm_mon == tm_month) {
-      uint8_t dayToday = local_tm.tm_mday;
-      uint8_t wDayToday = local_tm.tm_wday;
+      drawCircleAroundTheDay(local_tm.tm_mday, local_tm.tm_wday, firstWday);
       
-      uint16_t col = !isWkStartsMon ? wDayToday : (wDayToday + 6) % 7;   // Adjust x position based on week start day
-      uint16_t row = !isWkStartsMon ? (dayToday + firstWday - 1) / 7 : (dayToday + (firstWday + 6) % 7 - 1) / 7; // Adjust y position based on week start day
-      int16_t x = lMargin + col * cellUnit;
-      int16_t y = tMargin + row * cellUnit + 16;  // - row; // Adjust y position for the circle
-      for (uint8_t r = 30; r > 25; r--)
-        panelCanvas.drawCircle(x, y, r, TFT_RED);
+      /* for DEBUG, check the aixs of each day in the month with circle
+      for (int i = 1; i <= lastDay; i++) 
+        drawCircleAroundTheDay(i, (i + firstWday - 1) % 7, firstWday);
+      */
     }
   }
 }
@@ -690,7 +707,7 @@ void reDrawScreen(void *pvParameters) {
   targetLocal_tm.tm_mday = currentLocal_tm.tm_mday; // Keep the same day of the month
   targetLocal_tm.tm_isdst = -1;
 
-  if (targetLocal_tm.tm_mday > lastDay)     // Clamp to the target month's last day to avoid impossible dates like 31 -> 2/28.
+  if (targetLocal_tm.tm_mday > lastDay)     // Clamp to the target month's last day to avoid impossible dates like 31/Jan -> 28/Feb.
     targetLocal_tm.tm_mday = lastDay;
 
   target = mktime(&targetLocal_tm);
@@ -709,16 +726,17 @@ void reDrawScreen(void *pvParameters) {
   
   // Calendar(This month) drawing
   drawCalendar(targetLocal_tm.tm_year, targetLocal_tm.tm_mon , false);
-  screenCanvas.setClipRect(PANEL_SIZE, 0, screenCanvas.width(), screenCanvas.height());
+  screenCanvas.setClipRect(PANEL_SIZE, 0, screenCanvas.width() - PANEL_SIZE, screenCanvas.height());
   panelCanvas.pushSprite(&screenCanvas, PANEL_SIZE, 0);
 
   // Calendar(Next month) drawing
   drawCalendar(targetLocal_tm.tm_year, targetLocal_tm.tm_mon + 1, true);
   panelCanvas.setTextColor(TFT_BLACK, TFT_WHITE);
-  panelCanvas.setTextSize(0.9);
-  panelCanvas.setFont(MINI_MONTH_FONT);
-  panelCanvas.drawString(monthString[(targetLocal_tm.tm_mon + 1) % 12], 60, 4);
-  screenCanvas.setClipRect(0, PANEL_SIZE * 2 + 10, PANEL_SIZE, PANEL_SIZE + 10);  // Added 10 pixels for month name area
+  panelCanvas.setTextSize(1.2);
+  panelCanvas.setFont(&fonts::Font0);
+  panelCanvas.setTextDatum(textdatum_t::top_center);
+  panelCanvas.drawString(monthString[(targetLocal_tm.tm_mon + 1) % 12], PANEL_SIZE / 2, 6);
+  screenCanvas.setClipRect(0, PANEL_SIZE * 2 + 10, PANEL_SIZE, PANEL_SIZE + 10);  // Added 10 pixels for moon age(y) and month name(h) area
   panelCanvas.pushSprite(&screenCanvas, 0, PANEL_SIZE * 2 + 10);
 
   // Text information drawing
@@ -727,7 +745,7 @@ void reDrawScreen(void *pvParameters) {
   screenCanvas.setTextColor(TFT_BLACK, TFT_WHITE);
   screenCanvas.setCursor(22, 242);
   screenCanvas.printf("Moon Age:%.1f", _moonAge);
-  screenCanvas.setCursor(10, 380);
+  screenCanvas.setCursor(45, 380);
   screenCanvas.printf("Battery:%d%% at ", M5.Power.getBatteryLevel());
   screenCanvas.printf("%04d-%02d-%02d %02d:%02d:%02d, time sync %s. ",
     targetLocal_tm.tm_year + 1900, 
@@ -736,13 +754,13 @@ void reDrawScreen(void *pvParameters) {
     targetLocal_tm.tm_hour, 
     targetLocal_tm.tm_min, 
     targetLocal_tm.tm_sec,
-    isNtpSuccess ? "successed" : "failed or skipped"
+    isNtpSuccess ? "was successful." : "was skipped or failed."
   );
   screenCanvas.printf("IP:%s  ", WiFi.localIP().toString().c_str());
 
   // Low battery icon drawing
   if (batteryLow) 
-    screenCanvas.drawPng(l_battery_png, sizeof(l_battery_png), screenCanvas.width() - 32, screenCanvas.height() - 20);
+    screenCanvas.drawPng(l_battery_png, sizeof(l_battery_png), screenCanvas.width() - 32, screenCanvas.height() - 32);
   
 
   // Fiinally, push the composed screenCanvas to the actual display
@@ -1110,6 +1128,7 @@ void setup() {
   prefs.getString("ntp_server", "ntp.nict.jp").toCharArray(ntp_server, 64);
   prefs.getString("user_tz", "JST-9").toCharArray(user_tz, 32);
   prefs.getInt("refreshEvery", 0) ? refreshEvery = prefs.getInt("refreshEvery", 0) : refreshEvery = 0;
+  
   prefs.getBool("drawCircleToday", true) ? drawCircleToday = true : drawCircleToday = false;
   snprintf(
     drawCircleTodayHtml,
@@ -1124,6 +1143,7 @@ void setup() {
     "drawCircleTodayEditor"
   );
   
+  prefs.getBool("isWkStartsMon", false) ? isWkStartsMon = true : isWkStartsMon = false;
   snprintf(
     isWkStartsMonHtml,
     sizeof(isWkStartsMonHtml),
@@ -1136,7 +1156,6 @@ void setup() {
     "isWkStartsMon",
     "isWkStartsMonEditor"
   );
-  prefs.getBool("isWkStartsMon", false) ? isWkStartsMon = true : isWkStartsMon = false;
   
   prefs.getBool("localCalendar", false) ? localCalendarEnabled = true : localCalendarEnabled = false;
   snprintf(
@@ -1265,7 +1284,7 @@ void setup() {
 
     if (input_ip.length() > 0) {
       staticIpEnabled = true;
-      //screenCanvas.println("Static IP enabled");
+      Serial.println("Static IP enabled");
       strcpy(static_ip, input_ip.c_str());
       strcpy(gateway, p_gw.getValue());
       strcpy(subnetMask, p_sn.getValue());
@@ -1292,10 +1311,10 @@ void setup() {
     ESP.restart();
   }
 
+  // Timezone setting
   setenv("TZ", user_tz, 1);
   tzset();
 
-  // RTC setup
 #ifdef ARDUINO_M5STACK_PAPERCOLOR
   pixels.setPixelColor(LED_R, pixels.Color(0, 0, 255));
   pixels.show();
@@ -1309,6 +1328,7 @@ void setup() {
 #endif
 
   startTimeMillis = millis();   // Start the timer for deep sleep
+
 #ifdef DEBUG_SLEEP_LOG
   debugSleepStartMillis = millis();
   debugSleepLogged = false;
@@ -1557,14 +1577,16 @@ void loop() {
     startTimeMillis = millis();   // Reset the timer for deep sleep
   }
 
+  // Dispose of the draw task handle if the task has been deleted
   if (drawTaskHandle != NULL && eTaskGetState(drawTaskHandle) == eDeleted)
     drawTaskHandle = NULL;
 
+  // After 5min. of inactivity, the device will enter deep sleep mode if refreshEvery is set to a valid hour (0-23).
   if (millis() - startTimeMillis >= RUNTIME_MS && refreshEvery != -1 && drawTaskHandle == NULL && !isPortalRunning) {
-    if (currentDisplayMonthShift != 0) {
-      currentDisplayMonthShift = 0; // Reset to current month before sleeping
+    if (currentDisplayMonthShift != 0) {  // If the displayed month is not the current month, force a redraw to the current month before sleeping
+      currentDisplayMonthShift = 0;       // Reset to current month before sleeping
       asyncRedrawScreen(0);
-      startTimeMillis = millis(); // Re-arm the idle timer after the forced redraw
+      startTimeMillis = millis();         // Re-arm the idle timer after the forced redraw
       return;
     }
 
@@ -1582,6 +1604,8 @@ void loop() {
 
     skipBootToneOnWake = true;
     M5.Display.waitDisplay();
+    M5.Speaker.tone(NOTE_A7, 100); // Play a tone for feedback
+    delay(200);
     M5.Power.timerSleep(alarmTime); // Enter deep sleep mode with timer wakeup
   }
   
